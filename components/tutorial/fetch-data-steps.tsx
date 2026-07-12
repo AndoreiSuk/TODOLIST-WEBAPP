@@ -145,14 +145,9 @@ export function FetchDataSteps() {
           >
             Supabase UI library
           </a>{" "}
-          and try installing some blocks. For example, you can install a
-          Realtime Chat block by running:
+          and explore blocks that match the task management features you want
+          to add next.
         </p>
-        <CodeBlock
-          code={
-            "npx shadcn@latest add https://supabase.com/ui/r/realtime-chat-nextjs.json"
-          }
-        />
       </TutorialStep>
 
       <TutorialStep title="Build in a weekend and scale to millions!">

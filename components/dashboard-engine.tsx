@@ -11,7 +11,6 @@ import {
   ChevronRight,
   AlertCircle,
   MessageSquare,
-  Sparkles,
   Bold,
   Italic,
   Heading1,
@@ -19,11 +18,7 @@ import {
   List,
   Code,
   Link,
-  Send,
-  AtSign,
-  Hash,
   Check,
-  FolderClosed,
   Trash2,
 } from "lucide-react";
 
@@ -44,13 +39,6 @@ interface Task {
   notes: string;
 }
 
-interface Message {
-  id: string;
-  sender: "user" | "ai";
-  text: string;
-  timestamp: Date;
-}
-
 export default function Dashboard() {
   // --- CORE ENGINE STATES ---
   const [currentView, setCurrentView] = useState<string>("Inbox"); // Tracks view context or active project selection
@@ -67,7 +55,7 @@ export default function Dashboard() {
     { id: "p2", name: "Design", color: "bg-indigo-500 shadow-indigo-500/50" },
     {
       id: "p3",
-      name: "AI Integration",
+      name: "Documentation",
       color: "bg-purple-500 shadow-purple-500/50",
     },
     { id: "p4", name: "DevOps", color: "bg-amber-500 shadow-amber-500/50" },
@@ -94,8 +82,8 @@ export default function Dashboard() {
     },
     {
       id: "3",
-      title: "Refactor state context for AI streaming",
-      project: "AI Integration",
+      title: "Draft project setup notes",
+      project: "Documentation",
       priority: "Medium",
       dueDate: "Tomorrow",
       completed: false,
@@ -116,18 +104,6 @@ export default function Dashboard() {
   const [newTaskTitle, setNewTaskTitle] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [isSearching, setIsSearching] = useState<boolean>(false);
-
-  // AI State Engines
-  const [aiInput, setAiInput] = useState<string>("");
-  const [isAiTyping, setIsAiTyping] = useState<boolean>(false);
-  const [aiMessages, setAiMessages] = useState<Message[]>([
-    {
-      id: "m1",
-      sender: "ai",
-      text: "Hello! Select a task and I can help you break down subtasks, draft implementation plans, or format notes.",
-      timestamp: new Date(),
-    },
-  ]);
 
   // UI Flow toggles
   const [activeTask, setActiveTask] = useState<Task | null>(null);
@@ -272,43 +248,6 @@ export default function Dashboard() {
     }, 50);
   };
 
-  // --- SIMULATED AI RESPONSE CONTEXT HANDLING ---
-  const handleSendAiMessage = () => {
-    if (!aiInput.trim()) return;
-
-    const userMsg: Message = {
-      id: Date.now().toString(),
-      sender: "user",
-      text: aiInput,
-      timestamp: new Date(),
-    };
-
-    setAiMessages((prev) => [...prev, userMsg]);
-    const currentInput = aiInput;
-    setAiInput("");
-    setIsAiTyping(true);
-
-    setTimeout(() => {
-      let aiText = `I've analyzed task **"${activeTask?.title || "Selected Action"} "**. Here is a strategic micro-breakdown: \n\n1. Check internal configuration files.\n2. Review runtime parameters.`;
-      if (currentInput.toLowerCase().includes("break down")) {
-        aiText = `### Subtask Action Items for "${activeTask?.title}":\n- [ ] **Phase 1: Setup** — Inspect dependency rules.\n- [ ] **Phase 2: Code integration** — Build clean abstract wrappers.\n- [ ] **Phase 3: Verify** — Run automated validation sequences.`;
-      } else if (currentInput.toLowerCase().includes("note")) {
-        aiText = `### Technical Note Specification Draft:\n*Generated automatically for implementation metrics.*\n\n\`\`\`typescript\n// Runtime architectural footprint blueprint\nexport const initTaskAction = (): boolean => {\n  return true;\n};\n\`\`\``;
-      }
-
-      setAiMessages((prev) => [
-        ...prev,
-        {
-          id: (Date.now() + 1).toString(),
-          sender: "ai",
-          text: aiText,
-          timestamp: new Date(),
-        },
-      ]);
-      setIsAiTyping(false);
-    }, 1100);
-  };
-
   // --- STATS LOGIC COMPUTATION ---
   const filteredTasks = tasks.filter((t) => {
     // 1. Search filter criteria
@@ -352,6 +291,7 @@ export default function Dashboard() {
       {/* ========================================================
           A. LEFT SIDEBAR (Navigation) [220px]
           ======================================================== */}
+
       <aside className="w-[220px] bg-[#090d16] border-r border-slate-800/60 flex flex-col justify-between p-4 flex-shrink-0">
         <div>
           {/* Logo Heading updated tracking moniker label */}
@@ -739,7 +679,7 @@ export default function Dashboard() {
       </main>
 
       {/* ========================================================
-          C. RIGHT PANEL (The AI Assistant & Fully Functional Note Toolbar)
+          C. RIGHT PANEL (Task Notes Toolbar)
           ======================================================== */}
       <aside className="w-[360px] bg-[#090d16] border-l border-slate-800/60 flex flex-col h-full flex-shrink-0">
         {/* Top Half: Context Document / Active Document Rich Text Editor */}
@@ -826,130 +766,6 @@ export default function Dashboard() {
           />
         </div>
 
-        {/* Bottom Half: Embedded Core AI Assistant Interface */}
-        <div className="flex-1 flex flex-col min-h-[50%] bg-[#0b101b] overflow-hidden justify-between">
-          <div className="px-4 py-3 bg-[#080d17] border-b border-slate-800/40 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-indigo-400 animate-pulse" />
-              <span className="text-xs font-semibold text-slate-200">
-                Context AI Co-Pilot
-              </span>
-            </div>
-            <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_6px_#10b981]" />
-          </div>
-
-          {/* Messages Feed History Streams */}
-          <div className="flex-1 p-4 overflow-y-auto space-y-3 custom-scrollbar text-xs">
-            {aiMessages.map((msg) => (
-              <div
-                key={msg.id}
-                className={`flex flex-col ${msg.sender === "user" ? "items-end" : "items-start"}`}
-              >
-                <div
-                  className={`p-2.5 rounded-xl max-w-[90%] leading-relaxed border ${
-                    msg.sender === "user"
-                      ? "bg-indigo-600/10 text-indigo-200 border-indigo-500/20 rounded-br-none"
-                      : "bg-[#121926] text-slate-300 border-slate-800/80 rounded-bl-none"
-                  }`}
-                >
-                  <div className="whitespace-pre-wrap">{msg.text}</div>
-                </div>
-              </div>
-            ))}
-
-            {isAiTyping && (
-              <div className="flex items-center gap-1.5 bg-[#121926] border border-slate-800/80 w-16 p-2 rounded-xl rounded-bl-none">
-                <span
-                  className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce"
-                  style={{ animationDelay: "0ms" }}
-                />
-                <span
-                  className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce"
-                  style={{ animationDelay: "150ms" }}
-                />
-                <span
-                  className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce"
-                  style={{ animationDelay: "300ms" }}
-                />
-              </div>
-            )}
-          </div>
-
-          {/* Quick Prefill Actions Chips */}
-          <div className="px-3 pb-2 pt-1 flex gap-1.5 overflow-x-auto whitespace-nowrap hide-scrollbar">
-            <button
-              onClick={() => setAiInput("Break down this task context details")}
-              className="text-[10px] bg-slate-800/60 hover:bg-slate-800 text-slate-400 hover:text-slate-200 px-2.5 py-1 rounded-full border border-slate-800 transition-all flex-shrink-0"
-            >
-              ⚡ Break down task
-            </button>
-            <button
-              onClick={() =>
-                setAiInput("Draft technical notes implementation skeleton")
-              }
-              className="text-[10px] bg-slate-800/60 hover:bg-slate-800 text-slate-400 hover:text-slate-200 px-2.5 py-1 rounded-full border border-slate-800 transition-all flex-shrink-0"
-            >
-              📝 Draft technical notes
-            </button>
-          </div>
-
-          {/* Interactive Input Prompt Entry Pipeline Box */}
-          <div className="p-3 bg-[#080d17] border-t border-slate-800/60">
-            <div className="relative flex flex-col bg-[#111927] border border-slate-800 focus-within:border-indigo-500/80 rounded-xl transition-all">
-              <textarea
-                rows={2}
-                value={aiInput}
-                onChange={(e) => setAiInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSendAiMessage();
-                  }
-                }}
-                placeholder="Ask AI to break down this task or draft notes..."
-                className="w-full bg-transparent border-0 resize-none outline-none text-xs text-slate-200 placeholder-slate-600 p-2.5 pr-10 focus:ring-0"
-              />
-
-              <div className="flex items-center justify-between border-t border-slate-800/60 px-2.5 py-1.5">
-                <div className="flex items-center gap-2 text-slate-500">
-                  <button
-                    onClick={() => setAiInput((p) => p + " @")}
-                    title="Mention relative parameters"
-                    className="hover:text-indigo-400 transition-colors"
-                  >
-                    <AtSign className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => setAiInput((p) => p + " #")}
-                    title="Tag context label references"
-                    className="hover:text-indigo-400 transition-colors"
-                  >
-                    <Hash className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => setAiInput((p) => p + " /")}
-                    title="Prompt actions list modifiers"
-                    className="hover:text-indigo-400 font-mono text-[11px] leading-none px-0.5 transition-colors"
-                  >
-                    /
-                  </button>
-                </div>
-
-                <button
-                  onClick={handleSendAiMessage}
-                  disabled={!aiInput.trim()}
-                  className={`p-1.5 rounded-lg transition-all ${
-                    aiInput.trim()
-                      ? "bg-gradient-to-tr from-violet-600 to-indigo-500 text-white shadow-[0_0_10px_rgba(99,102,241,0.4)]"
-                      : "bg-slate-800 text-slate-600 cursor-not-allowed"
-                  }`}
-                >
-                  <Send className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
       </aside>
     </div>
   );
