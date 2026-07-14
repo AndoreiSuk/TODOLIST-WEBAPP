@@ -21,6 +21,7 @@ import {
   Check,
   Trash2,
 } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 
 // --- TYPE DEFINITIONS ---
 interface Project {
@@ -32,7 +33,7 @@ interface Project {
 interface Task {
   id: string;
   title: string;
-  project: string;
+  project: string; // project UUID
   priority: "Urgent" | "High" | "Medium" | "Low";
   dueDate: string;
   completed: boolean;
@@ -198,65 +199,16 @@ const normalizePriority = (priority?: string): Task["priority"] => {
 };
 
 export default function Dashboard() {
+  const supabase = createClient();
   // --- CORE ENGINE STATES ---
   const [currentView, setCurrentView] = useState<string>("Inbox"); // Tracks view context or active project selection
   const [priorityFilter, setPriorityFilter] = useState<
     "All" | "Urgent" | "High" | "Medium"
   >("All");
 
-  const [projects, setProjects] = useState<Project[]>([
-    {
-      id: "p1",
-      name: "Backend",
-      color: "bg-emerald-500 shadow-emerald-500/50",
-    },
-    { id: "p2", name: "Design", color: "bg-indigo-500 shadow-indigo-500/50" },
-    {
-      id: "p3",
-      name: "Documentation",
-      color: "bg-purple-500 shadow-purple-500/50",
-    },
-    { id: "p4", name: "DevOps", color: "bg-amber-500 shadow-amber-500/50" },
-  ]);
+  const [projects, setProjects] = useState<Project[]>([]);
 
-  const [tasks, setTasks] = useState<Task[]>([
-    {
-      id: "1",
-      title: "Implement Supabase auth hooks",
-      project: "Backend",
-      priority: "Urgent",
-      dueDate: "Today",
-      completed: false,
-      notes: "# Database Implementation\nNeed to look into triggers.",
-    },
-    {
-      id: "2",
-      title: "Design high-fidelity dashboard layouts",
-      project: "Design",
-      priority: "High",
-      dueDate: "Today",
-      completed: false,
-      notes: "Using Inter font and slate shades.",
-    },
-    {
-      id: "3",
-      title: "Draft project setup notes",
-      project: "Documentation",
-      priority: "Medium",
-      dueDate: "Tomorrow",
-      completed: false,
-      notes: "Using React hooks.",
-    },
-    {
-      id: "4",
-      title: "Setup Vercel staging environments",
-      project: "DevOps",
-      priority: "Low",
-      dueDate: "Jul 15",
-      completed: true,
-      notes: "Done with initial configurations.",
-    },
-  ]);
+  const [tasks, setTasks] = useState<Task[]>([]);
 
   const [selectedTaskId, setSelectedTaskId] = useState<string>("1");
   const [newTaskTitle, setNewTaskTitle] = useState<string>("");
@@ -272,6 +224,50 @@ export default function Dashboard() {
   const selectedTaskIdRef = useRef(selectedTaskId);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  const loadProjects = async () => {
+  const { data, error } = await supabase
+    .from("projects")
+    .select("*")
+    .order("created_at");
+
+  if (error) {
+    console.error(error);
+    return;
+  }
+
+  setProjects(data);
+  };
+
+  const loadTasks = async () => {
+  const { data, error } = await supabase
+    .from("tasks")
+    .select(`
+      *,
+      projects (
+        id,
+        name,
+        color
+      )
+    `)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error(error);
+    return;
+  }
+
+  const formatted: Task[] = data.map((task: any) => ({
+    id: task.id,
+    title: task.title,
+    project: task.projects?.name ?? "",
+    priority: task.priority,
+    dueDate: new Date(task.due_date).toLocaleDateString(),
+    completed: task.completed,
+    notes: task.notes ?? "",
+  }));
+
+  setTasks(formatted);
+};
   // Sync active task tracking reference when item hooks shift
   useEffect(() => {
     selectedTaskIdRef.current = selectedTaskId;
@@ -285,40 +281,44 @@ export default function Dashboard() {
       setActiveTask(null);
     }
   }, [selectedTaskId, tasks]);
-
+  useEffect(() => {
+  loadProjects();
+  loadTasks();
+}, []);
   // --- ACTIONS ENGINE ---
-  const handleAddTask = (e: React.FormEvent) => {
+  const handleAddTask = async (e: React.FormEvent) => {
     e.preventDefault();
+
     if (!newTaskTitle.trim()) return;
 
-    // Fallback assignment to ensure priority tracks precisely against currently chosen priority filter
-    const determinedPriority =
+    const project = projects.find((p) => p.name === currentView);
+
+    const priority =
       priorityFilter === "All" ? "Medium" : priorityFilter;
 
-    // Assign project metadata intelligently based on current navigation location context
-    const currentProjectMatch = projects.find((p) => p.name === currentView);
-    const assignedProjectName = currentProjectMatch
-      ? currentProjectMatch.name
-      : "Inbox";
-
-    const newTask: Task = {
-      id: Date.now().toString(),
+    const { error } = await supabase.from("tasks").insert({
       title: newTaskTitle,
-      project: assignedProjectName,
-      priority: determinedPriority,
-      dueDate: "Today",
+      project: project?.id ?? null,
+      priority,
+      due_date: new Date(),
       completed: false,
       notes: "",
-    };
+    });
 
-    setTasks([newTask, ...tasks]);
-    setSelectedTaskId(newTask.id);
+    if (error) {
+      console.error(error);
+      return;
+    }
+
     setNewTaskTitle("");
+
+    await loadTasks();
   };
 
-  const handleCreateNewProject = () => {
-    const pName = prompt("Enter new project title name:");
-    if (!pName || !pName.trim()) return;
+  const handleCreateNewProject = async () => {
+    const pName = prompt("Project name");
+
+    if (!pName) return;
 
     const colors = [
       "bg-pink-500 shadow-pink-500/50",
@@ -327,38 +327,82 @@ export default function Dashboard() {
       "bg-teal-500 shadow-teal-500/50",
       "bg-violet-500 shadow-violet-500/50",
     ];
-    const pickedColor = colors[projects.length % colors.length];
 
-    const newProject: Project = {
-      id: `p-${Date.now()}`,
-      name: pName.trim(),
-      color: pickedColor,
-    };
+    const color = colors[Math.floor(Math.random() * colors.length)];
 
-    setProjects([...projects, newProject]);
-    setCurrentView(newProject.name);
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) return;
+
+    const { error } = await supabase.from("projects").insert({
+      name: pName,
+      color,
+      user_id: user.id,
+    });
+
+    if (error) {
+      console.error(error);
+      return;
+    }
+
+    await loadProjects();
   };
 
-  const handleDeleteTask = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation(); // Stops system row item context highlights from triggering
-    const updatedTasks = tasks.filter((t) => t.id !== id);
-    setTasks(updatedTasks);
-  };
-
-  const toggleTaskCompletion = (id: string, e: React.MouseEvent) => {
+  const handleDeleteTask = async (
+    id: string,
+    e: React.MouseEvent
+  ) => {
     e.stopPropagation();
-    setTasks(
-      tasks.map((t) => (t.id === id ? { ...t, completed: !t.completed } : t)),
-    );
+
+    await supabase
+      .from("tasks")
+      .delete()
+      .eq("id", id);
+
+    await loadTasks();
+  };
+    
+  const toggleTaskCompletion = async (
+    id: string,
+    e: React.MouseEvent
+  ) => {
+    e.stopPropagation();
+
+    const task = tasks.find((t) => t.id === id);
+
+    if (!task) return;
+
+    await supabase
+      .from("tasks")
+      .update({
+        completed: !task.completed,
+      })
+      .eq("id", id);
+
+    await loadTasks();
   };
 
-  const updateActiveTaskNotes = (val: string) => {
+  const updateActiveTaskNotes = async (val: string) => {
     const activeId = selectedTaskIdRef.current;
+
     if (!activeId) return;
 
-    setTasks((currentTasks) =>
-      currentTasks.map((t) => (t.id === activeId ? { ...t, notes: val } : t)),
+    setTasks((current) =>
+      current.map((t) =>
+        t.id === activeId
+          ? { ...t, notes: val }
+          : t
+      )
     );
+
+    await supabase
+      .from("tasks")
+      .update({
+        notes: val,
+      })
+      .eq("id", activeId);
   };
 
   const sendMessageToAI = async (message: string) => {
@@ -574,7 +618,7 @@ export default function Dashboard() {
             >
               <div className="flex items-center gap-2.5">
                 <Inbox className="w-4 h-4" />
-                <span>My Inbox</span>
+                <span>To-do's</span>
               </div>
               <span className="text-[10px] bg-slate-800/80 px-1.5 py-0.5 rounded text-slate-400 font-bold">
                 {tasks.filter((t) => !t.completed).length}
@@ -790,7 +834,7 @@ export default function Dashboard() {
                             {task.title}
                           </p>
                           <span className="text-[10px] font-mono text-slate-500">
-                            {task.project}
+                            {task.project || "Inbox"}
                           </span>
                         </div>
                       </div>
@@ -944,7 +988,7 @@ export default function Dashboard() {
                 {activeTask.title}
               </p>
               <div className="mt-2 flex items-center gap-2 text-[10px] text-slate-500">
-                <span>{activeTask.project}</span>
+                <span>{activeTask.project || "To-do's"}</span>
                 <span className="w-1 h-1 rounded-full bg-slate-700" />
                 <span>{activeTask.priority}</span>
                 <span className="w-1 h-1 rounded-full bg-slate-700" />
