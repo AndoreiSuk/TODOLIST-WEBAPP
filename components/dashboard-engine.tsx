@@ -82,7 +82,9 @@ const renderMarkdownPreview = (markdown: string) => {
   lines.forEach((line) => {
     if (line.trim().startsWith("```")) {
       if (inCodeBlock) {
-        html.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
+        html.push(
+          `<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`,
+        );
         codeLines = [];
         inCodeBlock = false;
       } else {
@@ -225,49 +227,51 @@ export default function Dashboard() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const loadProjects = async () => {
-  const { data, error } = await supabase
-    .from("projects")
-    .select("*")
-    .order("created_at");
+    const { data, error } = await supabase
+      .from("projects")
+      .select("*")
+      .order("created_at");
 
-  if (error) {
-    console.error(error);
-    return;
-  }
+    if (error) {
+      console.error(error);
+      return;
+    }
 
-  setProjects(data);
+    setProjects(data);
   };
 
   const loadTasks = async () => {
-  const { data, error } = await supabase
-    .from("tasks")
-    .select(`
+    const { data, error } = await supabase
+      .from("tasks")
+      .select(
+        `
       *,
       projects (
         id,
         name,
         color
       )
-    `)
-    .order("created_at", { ascending: false });
+    `,
+      )
+      .order("created_at", { ascending: false });
 
-  if (error) {
-    console.error(error);
-    return;
-  }
+    if (error) {
+      console.error(error);
+      return;
+    }
 
-  const formatted: Task[] = data.map((task: any) => ({
-    id: task.id,
-    title: task.title,
-    project: task.projects?.name ?? "",
-    priority: task.priority,
-    dueDate: new Date(task.due_date).toLocaleDateString(),
-    completed: task.completed,
-    notes: task.notes ?? "",
-  }));
+    const formatted: Task[] = data.map((task: any) => ({
+      id: task.id,
+      title: task.title,
+      project: task.projects?.name ?? "",
+      priority: task.priority,
+      dueDate: new Date(task.due_date).toLocaleDateString(),
+      completed: task.completed,
+      notes: task.notes ?? "",
+    }));
 
-  setTasks(formatted);
-};
+    setTasks(formatted);
+  };
   // Sync active task tracking reference when item hooks shift
   useEffect(() => {
     selectedTaskIdRef.current = selectedTaskId;
@@ -282,9 +286,9 @@ export default function Dashboard() {
     }
   }, [selectedTaskId, tasks]);
   useEffect(() => {
-  loadProjects();
-  loadTasks();
-}, []);
+    loadProjects();
+    loadTasks();
+  }, []);
   // --- ACTIONS ENGINE ---
   const handleAddTask = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -293,8 +297,7 @@ export default function Dashboard() {
 
     const project = projects.find((p) => p.name === currentView);
 
-    const priority =
-      priorityFilter === "All" ? "Medium" : priorityFilter;
+    const priority = priorityFilter === "All" ? "Medium" : priorityFilter;
 
     const { error } = await supabase.from("tasks").insert({
       title: newTaskTitle,
@@ -350,24 +353,15 @@ export default function Dashboard() {
     await loadProjects();
   };
 
-  const handleDeleteTask = async (
-    id: string,
-    e: React.MouseEvent
-  ) => {
+  const handleDeleteTask = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
 
-    await supabase
-      .from("tasks")
-      .delete()
-      .eq("id", id);
+    await supabase.from("tasks").delete().eq("id", id);
 
     await loadTasks();
   };
-    
-  const toggleTaskCompletion = async (
-    id: string,
-    e: React.MouseEvent
-  ) => {
+
+  const toggleTaskCompletion = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
 
     const task = tasks.find((t) => t.id === id);
@@ -390,11 +384,7 @@ export default function Dashboard() {
     if (!activeId) return;
 
     setTasks((current) =>
-      current.map((t) =>
-        t.id === activeId
-          ? { ...t, notes: val }
-          : t
-      )
+      current.map((t) => (t.id === activeId ? { ...t, notes: val } : t)),
     );
 
     await supabase
@@ -985,18 +975,16 @@ export default function Dashboard() {
             <div className="mb-3 border border-slate-800/70 bg-[#111927]/60 rounded-lg p-3 flex items-center justify-between gap-3">
               <div>
                 <p className="text-xs font-semibold text-slate-200 leading-snug">
-                {activeTask.title}
-              </p>
-              <div className="mt-2 flex items-center gap-2 text-[10px] text-slate-500">
-                <span>{activeTask.project || "To-do's"}</span>
-                <span className="w-1 h-1 rounded-full bg-slate-700" />
-                <span>{activeTask.priority}</span>
-                <span className="w-1 h-1 rounded-full bg-slate-700" />
-                <span>{activeTask.dueDate}</span>
-                
+                  {activeTask.title}
+                </p>
+                <div className="mt-2 flex items-center gap-2 text-[10px] text-slate-500">
+                  <span>{activeTask.project || "To-do's"}</span>
+                  <span className="w-1 h-1 rounded-full bg-slate-700" />
+                  <span>{activeTask.priority}</span>
+                  <span className="w-1 h-1 rounded-full bg-slate-700" />
+                  <span>{activeTask.dueDate}</span>
+                </div>
               </div>
-              </div>
-              
             </div>
           )}
 
@@ -1116,24 +1104,24 @@ export default function Dashboard() {
                 <p className="mt-3 text-xs text-rose-400">{aiError}</p>
               )}
               <div className="mt-5 flex items-center justify-end gap-2">
-                  <button
-                    type="button"
+                <button
+                  type="button"
                   onClick={() => setIsAiModelOpen(false)}
                   disabled={isAiLoading}
                   className="px-4 py-2 border border-slate-700 text-slate-300 rounded hover:bg-slate-800 transition disabled:opacity-50"
                 >
                   Cancel
                 </button>
-              <button
-                    type="button"
+                <button
+                  type="button"
                   onClick={() => {
                     sendMessageToAI(aiPrompt);
                   }}
                   disabled={isAiLoading}
                   className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-500 transition disabled:opacity-50"
-              >
+                >
                   {isAiLoading ? "Formatting..." : "Generate Task"}
-              </button>
+                </button>
               </div>
             </div>
           </div>
