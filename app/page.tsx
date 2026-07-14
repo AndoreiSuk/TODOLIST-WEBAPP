@@ -1,9 +1,6 @@
-import DashboardEngine from "@/components/dashboard-engine";
+import { redirect } from "next/navigation";
 
-export default function Home() {
-  return (
-    <main className="min-h-screen bg-[#0f172a]">
-      <DashboardEngine />
-    </main>
-  );
+export default function RootPage() {
+  // Triggers an immediate redirect to the /home route
+  redirect("/home");
 }

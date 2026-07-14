@@ -11,7 +11,6 @@ import {
   ChevronRight,
   AlertCircle,
   MessageSquare,
-  Sparkles,
   Bold,
   Italic,
   Heading1,
@@ -19,13 +18,10 @@ import {
   List,
   Code,
   Link,
-  Send,
-  AtSign,
-  Hash,
   Check,
-  FolderClosed,
   Trash2,
 } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 
 // --- TYPE DEFINITIONS ---
 interface Project {
@@ -37,104 +33,244 @@ interface Project {
 interface Task {
   id: string;
   title: string;
-  project: string;
+  project: string; // project UUID
   priority: "Urgent" | "High" | "Medium" | "Low";
   dueDate: string;
   completed: boolean;
   notes: string;
 }
 
-interface Message {
-  id: string;
-  sender: "user" | "ai";
-  text: string;
-  timestamp: Date;
+interface AITaskDraft {
+  title?: string;
+  project?: string;
+  priority?: string;
+  dueDate?: string;
+  notes?: string;
 }
 
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+
+const parseInlineMarkdown = (value: string) =>
+  escapeHtml(value)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*([^*]+)\*/g, "<em>$1</em>")
+    .replace(
+      /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
+      '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>',
+    );
+
+const renderMarkdownPreview = (markdown: string) => {
+  const lines = markdown.split("\n");
+  const html: string[] = [];
+  let inList = false;
+  let inCodeBlock = false;
+  let codeLines: string[] = [];
+
+  const closeList = () => {
+    if (!inList) return;
+    html.push("</ul>");
+    inList = false;
+  };
+
+  lines.forEach((line) => {
+    if (line.trim().startsWith("```")) {
+      if (inCodeBlock) {
+        html.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
+        codeLines = [];
+        inCodeBlock = false;
+      } else {
+        closeList();
+        inCodeBlock = true;
+      }
+      return;
+    }
+
+    if (inCodeBlock) {
+      codeLines.push(line);
+      return;
+    }
+
+    if (line.startsWith("# ")) {
+      closeList();
+      html.push(`<h1>${parseInlineMarkdown(line.slice(2))}</h1>`);
+      return;
+    }
+
+    if (line.startsWith("## ")) {
+      closeList();
+      html.push(`<h2>${parseInlineMarkdown(line.slice(3))}</h2>`);
+      return;
+    }
+
+    if (line.startsWith("- ")) {
+      if (!inList) {
+        html.push("<ul>");
+        inList = true;
+      }
+      html.push(`<li>${parseInlineMarkdown(line.slice(2))}</li>`);
+      return;
+    }
+
+    closeList();
+    if (line.trim() === "") {
+      html.push("<br />");
+    } else {
+      html.push(`<p>${parseInlineMarkdown(line)}</p>`);
+    }
+  });
+
+  closeList();
+  if (inCodeBlock) {
+    html.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
+  }
+
+  return html.join("");
+};
+
+const parseAITaskDraft = (value: string): AITaskDraft => {
+  const withoutFence = value
+    .replace(/```json/gi, "")
+    .replace(/```/g, "")
+    .trim();
+  const jsonMatch = withoutFence.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    throw new Error("AI response did not include a task JSON object.");
+  }
+
+  try {
+    return JSON.parse(jsonMatch[0]) as AITaskDraft;
+  } catch {
+    const repairedJson = jsonMatch[0]
+      .replace(/([{,]\s*)([A-Za-z_][\w-]*)(\s*:)/g, '$1"$2"$3')
+      .replace(/'([^']*)'/g, '"$1"');
+
+    try {
+      return JSON.parse(repairedJson) as AITaskDraft;
+    } catch {
+      const readField = (field: string) => {
+        const fieldMatch = jsonMatch[0].match(
+          new RegExp(
+            `${field}\\s*:\\s*(?:"([^"]*)"|'([^']*)'|([^,}\\n]+))`,
+            "i",
+          ),
+        );
+
+        return (
+          fieldMatch?.[1] ||
+          fieldMatch?.[2] ||
+          fieldMatch?.[3]?.trim().replace(/^"|"$/g, "") ||
+          ""
+        );
+      };
+
+      return {
+        title: readField("title"),
+        project: readField("project"),
+        priority: readField("priority"),
+        dueDate: readField("dueDate"),
+        notes: readField("notes"),
+      };
+    }
+  }
+};
+
+const parseAIError = (value: string) => {
+  try {
+    const parsed = JSON.parse(value) as { error?: string };
+    return parsed.error || "";
+  } catch {
+    return "";
+  }
+};
+
+const normalizePriority = (priority?: string): Task["priority"] => {
+  if (priority === "Urgent" || priority === "High" || priority === "Low") {
+    return priority;
+  }
+
+  return "Medium";
+};
+
 export default function Dashboard() {
+  const supabase = createClient();
   // --- CORE ENGINE STATES ---
   const [currentView, setCurrentView] = useState<string>("Inbox"); // Tracks view context or active project selection
   const [priorityFilter, setPriorityFilter] = useState<
     "All" | "Urgent" | "High" | "Medium"
   >("All");
 
-  const [projects, setProjects] = useState<Project[]>([
-    {
-      id: "p1",
-      name: "Backend",
-      color: "bg-emerald-500 shadow-emerald-500/50",
-    },
-    { id: "p2", name: "Design", color: "bg-indigo-500 shadow-indigo-500/50" },
-    {
-      id: "p3",
-      name: "AI Integration",
-      color: "bg-purple-500 shadow-purple-500/50",
-    },
-    { id: "p4", name: "DevOps", color: "bg-amber-500 shadow-amber-500/50" },
-  ]);
+  const [projects, setProjects] = useState<Project[]>([]);
 
-  const [tasks, setTasks] = useState<Task[]>([
-    {
-      id: "1",
-      title: "Implement Supabase auth hooks",
-      project: "Backend",
-      priority: "Urgent",
-      dueDate: "Today",
-      completed: false,
-      notes: "# Database Implementation\nNeed to look into triggers.",
-    },
-    {
-      id: "2",
-      title: "Design high-fidelity dashboard layouts",
-      project: "Design",
-      priority: "High",
-      dueDate: "Today",
-      completed: false,
-      notes: "Using Inter font and slate shades.",
-    },
-    {
-      id: "3",
-      title: "Refactor state context for AI streaming",
-      project: "AI Integration",
-      priority: "Medium",
-      dueDate: "Tomorrow",
-      completed: false,
-      notes: "Using React hooks.",
-    },
-    {
-      id: "4",
-      title: "Setup Vercel staging environments",
-      project: "DevOps",
-      priority: "Low",
-      dueDate: "Jul 15",
-      completed: true,
-      notes: "Done with initial configurations.",
-    },
-  ]);
+  const [tasks, setTasks] = useState<Task[]>([]);
 
   const [selectedTaskId, setSelectedTaskId] = useState<string>("1");
   const [newTaskTitle, setNewTaskTitle] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [isSearching, setIsSearching] = useState<boolean>(false);
 
-  // AI State Engines
-  const [aiInput, setAiInput] = useState<string>("");
-  const [isAiTyping, setIsAiTyping] = useState<boolean>(false);
-  const [aiMessages, setAiMessages] = useState<Message[]>([
-    {
-      id: "m1",
-      sender: "ai",
-      text: "Hello! Select a task and I can help you break down subtasks, draft implementation plans, or format notes.",
-      timestamp: new Date(),
-    },
-  ]);
-
   // UI Flow toggles
   const [activeTask, setActiveTask] = useState<Task | null>(null);
+  const [isAiModelOpen, setIsAiModelOpen] = useState<boolean>(false);
+  const [aiPrompt, setAiPrompt] = useState<string>("");
+  const [isAiLoading, setIsAiLoading] = useState<boolean>(false);
+  const [aiError, setAiError] = useState<string>("");
+  const selectedTaskIdRef = useRef(selectedTaskId);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  const loadProjects = async () => {
+  const { data, error } = await supabase
+    .from("projects")
+    .select("*")
+    .order("created_at");
+
+  if (error) {
+    console.error(error);
+    return;
+  }
+
+  setProjects(data);
+  };
+
+  const loadTasks = async () => {
+  const { data, error } = await supabase
+    .from("tasks")
+    .select(`
+      *,
+      projects (
+        id,
+        name,
+        color
+      )
+    `)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error(error);
+    return;
+  }
+
+  const formatted: Task[] = data.map((task: any) => ({
+    id: task.id,
+    title: task.title,
+    project: task.projects?.name ?? "",
+    priority: task.priority,
+    dueDate: new Date(task.due_date).toLocaleDateString(),
+    completed: task.completed,
+    notes: task.notes ?? "",
+  }));
+
+  setTasks(formatted);
+};
   // Sync active task tracking reference when item hooks shift
   useEffect(() => {
+    selectedTaskIdRef.current = selectedTaskId;
     const target = tasks.find((t) => t.id === selectedTaskId);
     if (target) {
       setActiveTask(target);
@@ -145,40 +281,44 @@ export default function Dashboard() {
       setActiveTask(null);
     }
   }, [selectedTaskId, tasks]);
-
+  useEffect(() => {
+  loadProjects();
+  loadTasks();
+}, []);
   // --- ACTIONS ENGINE ---
-  const handleAddTask = (e: React.FormEvent) => {
+  const handleAddTask = async (e: React.FormEvent) => {
     e.preventDefault();
+
     if (!newTaskTitle.trim()) return;
 
-    // Fallback assignment to ensure priority tracks precisely against currently chosen priority filter
-    const determinedPriority =
+    const project = projects.find((p) => p.name === currentView);
+
+    const priority =
       priorityFilter === "All" ? "Medium" : priorityFilter;
 
-    // Assign project metadata intelligently based on current navigation location context
-    const currentProjectMatch = projects.find((p) => p.name === currentView);
-    const assignedProjectName = currentProjectMatch
-      ? currentProjectMatch.name
-      : "Inbox";
-
-    const newTask: Task = {
-      id: Date.now().toString(),
+    const { error } = await supabase.from("tasks").insert({
       title: newTaskTitle,
-      project: assignedProjectName,
-      priority: determinedPriority,
-      dueDate: "Today",
+      project: project?.id ?? null,
+      priority,
+      due_date: new Date(),
       completed: false,
       notes: "",
-    };
+    });
 
-    setTasks([newTask, ...tasks]);
-    setSelectedTaskId(newTask.id);
+    if (error) {
+      console.error(error);
+      return;
+    }
+
     setNewTaskTitle("");
+
+    await loadTasks();
   };
 
-  const handleCreateNewProject = () => {
-    const pName = prompt("Enter new project title name:");
-    if (!pName || !pName.trim()) return;
+  const handleCreateNewProject = async () => {
+    const pName = prompt("Project name");
+
+    if (!pName) return;
 
     const colors = [
       "bg-pink-500 shadow-pink-500/50",
@@ -187,39 +327,149 @@ export default function Dashboard() {
       "bg-teal-500 shadow-teal-500/50",
       "bg-violet-500 shadow-violet-500/50",
     ];
-    const pickedColor = colors[Math.floor(Math.random() * colors.length)];
 
-    const newProject: Project = {
-      id: `p-${Date.now()}`,
-      name: pName.trim(),
-      color: pickedColor,
-    };
+    const color = colors[Math.floor(Math.random() * colors.length)];
 
-    setProjects([...projects, newProject]);
-    setCurrentView(newProject.name);
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) return;
+
+    const { error } = await supabase.from("projects").insert({
+      name: pName,
+      color,
+      user_id: user.id,
+    });
+
+    if (error) {
+      console.error(error);
+      return;
+    }
+
+    await loadProjects();
   };
 
-  const handleDeleteTask = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation(); // Stops system row item context highlights from triggering
-    const updatedTasks = tasks.filter((t) => t.id !== id);
-    setTasks(updatedTasks);
-  };
-
-  const toggleTaskCompletion = (id: string, e: React.MouseEvent) => {
+  const handleDeleteTask = async (
+    id: string,
+    e: React.MouseEvent
+  ) => {
     e.stopPropagation();
-    setTasks(
-      tasks.map((t) => (t.id === id ? { ...t, completed: !t.completed } : t)),
-    );
+
+    await supabase
+      .from("tasks")
+      .delete()
+      .eq("id", id);
+
+    await loadTasks();
+  };
+    
+  const toggleTaskCompletion = async (
+    id: string,
+    e: React.MouseEvent
+  ) => {
+    e.stopPropagation();
+
+    const task = tasks.find((t) => t.id === id);
+
+    if (!task) return;
+
+    await supabase
+      .from("tasks")
+      .update({
+        completed: !task.completed,
+      })
+      .eq("id", id);
+
+    await loadTasks();
   };
 
-  const updateActiveTaskNotes = (val: string) => {
-    if (!selectedTaskId) return;
-    setTasks(
-      tasks.map((t) => (t.id === selectedTaskId ? { ...t, notes: val } : t)),
+  const updateActiveTaskNotes = async (val: string) => {
+    const activeId = selectedTaskIdRef.current;
+
+    if (!activeId) return;
+
+    setTasks((current) =>
+      current.map((t) =>
+        t.id === activeId
+          ? { ...t, notes: val }
+          : t
+      )
     );
+
+    await supabase
+      .from("tasks")
+      .update({
+        notes: val,
+      })
+      .eq("id", activeId);
   };
 
-  // --- RICH TEXT FORMATTING WRAPPER ---
+  const sendMessageToAI = async (message: string) => {
+    const trimmedMessage = message.trim();
+    if (!trimmedMessage) {
+      setAiError("Write a task description first.");
+      return;
+    }
+
+    setIsAiLoading(true);
+    setAiError("");
+
+    try {
+      const response = await fetch("/api/use-ai", {
+        method: "POST",
+        headers: {
+          "Content-Type": "text/plain",
+        },
+        body: trimmedMessage,
+      });
+
+      const rawResponse = await response.text();
+      if (!response.ok) {
+        throw new Error(
+          parseAIError(rawResponse) ||
+            "AI request failed. Check your API key and server log.",
+        );
+      }
+
+      const draft = parseAITaskDraft(rawResponse);
+      if (!draft.title?.trim()) {
+        throw new Error(
+          "AI did not return a task title. Try a more specific description.",
+        );
+      }
+
+      const fallbackProject = projects.find((p) => p.name === currentView)
+        ? currentView
+        : "Inbox";
+
+      const newTask: Task = {
+        id: Date.now().toString(),
+        title: draft.title.trim(),
+        project: draft.project?.trim() || fallbackProject,
+        priority: normalizePriority(draft.priority),
+        dueDate: draft.dueDate?.trim() || "Today",
+        completed: false,
+        notes: draft.notes?.trim() || "",
+      };
+
+      setTasks((currentTasks) => [newTask, ...currentTasks]);
+      setSelectedTaskId(newTask.id);
+      setNewTaskTitle("");
+      setAiPrompt("");
+      setIsAiModelOpen(false);
+    } catch (error) {
+      setAiError(
+        error instanceof Error
+          ? error.message
+          : "Something went wrong while formatting the task.",
+      );
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
+
+  // --- MARKDOWN FORMATTING WRAPPER ---
   const insertMarkdownSyntax = (
     syntaxType: "bold" | "italic" | "h1" | "h2" | "bullet" | "code" | "link",
   ) => {
@@ -240,16 +490,18 @@ export default function Dashboard() {
         replacement = `*${selectedText || "italicized text"}*`;
         break;
       case "h1":
-        replacement = `\n# ${selectedText || "Heading 1"}\n`;
+        replacement = `# ${selectedText || "Heading 1"}`;
         break;
       case "h2":
-        replacement = `\n## ${selectedText || "Heading 2"}\n`;
+        replacement = `## ${selectedText || "Heading 2"}`;
         break;
       case "bullet":
-        replacement = `\n- ${selectedText || "List item"}`;
+        replacement = `- ${selectedText || "List item"}`;
         break;
       case "code":
-        replacement = `\`\`\`\n${selectedText || "code content"}\n\`\`\``;
+        replacement = selectedText
+          ? `\`\`\`\n${selectedText}\n\`\`\``
+          : "```\ncode content\n```";
         break;
       case "link":
         replacement = `[${selectedText || "Link Title"}](https://example.com)`;
@@ -262,7 +514,6 @@ export default function Dashboard() {
       currentText.substring(endPos);
     updateActiveTaskNotes(updatedNotes);
 
-    // Refocus cursor selection indices cleanly
     setTimeout(() => {
       textarea.focus();
       textarea.setSelectionRange(
@@ -270,43 +521,6 @@ export default function Dashboard() {
         startPos + replacement.length,
       );
     }, 50);
-  };
-
-  // --- SIMULATED AI RESPONSE CONTEXT HANDLING ---
-  const handleSendAiMessage = () => {
-    if (!aiInput.trim()) return;
-
-    const userMsg: Message = {
-      id: Date.now().toString(),
-      sender: "user",
-      text: aiInput,
-      timestamp: new Date(),
-    };
-
-    setAiMessages((prev) => [...prev, userMsg]);
-    const currentInput = aiInput;
-    setAiInput("");
-    setIsAiTyping(true);
-
-    setTimeout(() => {
-      let aiText = `I've analyzed task **"${activeTask?.title || "Selected Action"} "**. Here is a strategic micro-breakdown: \n\n1. Check internal configuration files.\n2. Review runtime parameters.`;
-      if (currentInput.toLowerCase().includes("break down")) {
-        aiText = `### Subtask Action Items for "${activeTask?.title}":\n- [ ] **Phase 1: Setup** — Inspect dependency rules.\n- [ ] **Phase 2: Code integration** — Build clean abstract wrappers.\n- [ ] **Phase 3: Verify** — Run automated validation sequences.`;
-      } else if (currentInput.toLowerCase().includes("note")) {
-        aiText = `### Technical Note Specification Draft:\n*Generated automatically for implementation metrics.*\n\n\`\`\`typescript\n// Runtime architectural footprint blueprint\nexport const initTaskAction = (): boolean => {\n  return true;\n};\n\`\`\``;
-      }
-
-      setAiMessages((prev) => [
-        ...prev,
-        {
-          id: (Date.now() + 1).toString(),
-          sender: "ai",
-          text: aiText,
-          timestamp: new Date(),
-        },
-      ]);
-      setIsAiTyping(false);
-    }, 1100);
   };
 
   // --- STATS LOGIC COMPUTATION ---
@@ -352,6 +566,7 @@ export default function Dashboard() {
       {/* ========================================================
           A. LEFT SIDEBAR (Navigation) [220px]
           ======================================================== */}
+
       <aside className="w-[220px] bg-[#090d16] border-r border-slate-800/60 flex flex-col justify-between p-4 flex-shrink-0">
         <div>
           {/* Logo Heading updated tracking moniker label */}
@@ -403,7 +618,7 @@ export default function Dashboard() {
             >
               <div className="flex items-center gap-2.5">
                 <Inbox className="w-4 h-4" />
-                <span>My Inbox</span>
+                <span>To-do's</span>
               </div>
               <span className="text-[10px] bg-slate-800/80 px-1.5 py-0.5 rounded text-slate-400 font-bold">
                 {tasks.filter((t) => !t.completed).length}
@@ -563,6 +778,17 @@ export default function Dashboard() {
               className="w-full bg-[#111927] border border-slate-800 hover:border-slate-700/80 focus:border-indigo-500/80 rounded-xl px-4 py-3 text-xs text-slate-200 placeholder-slate-500 outline-none transition-all shadow-inner pr-12 focus:shadow-[0_0_15px_rgba(99,102,241,0.15)]"
             />
             <button
+              type="button"
+              onClick={() => {
+                setAiError("");
+                setAiPrompt(newTaskTitle);
+                setIsAiModelOpen(true);
+              }}
+              className="absolute right-10 top-2.5 px-1 py-0.5 rounded-lg text-xs border border-slate-600 hover:bg-slate-800 transition-colors"
+            >
+              AI
+            </button>
+            <button
               type="submit"
               className="absolute right-2.5 top-2 bg-indigo-600 hover:bg-indigo-500 p-1.5 rounded-lg text-white transition-all shadow"
             >
@@ -608,7 +834,7 @@ export default function Dashboard() {
                             {task.title}
                           </p>
                           <span className="text-[10px] font-mono text-slate-500">
-                            {task.project}
+                            {task.project || "Inbox"}
                           </span>
                         </div>
                       </div>
@@ -739,15 +965,14 @@ export default function Dashboard() {
       </main>
 
       {/* ========================================================
-          C. RIGHT PANEL (The AI Assistant & Fully Functional Note Toolbar)
+          C. RIGHT PANEL (Task Notes Toolbar)
           ======================================================== */}
       <aside className="w-[360px] bg-[#090d16] border-l border-slate-800/60 flex flex-col h-full flex-shrink-0">
-        {/* Top Half: Context Document / Active Document Rich Text Editor */}
-        <div className="flex-1 flex flex-col min-h-[45%] border-b border-slate-800/60 p-4 overflow-hidden">
-          <div className="flex items-center justify-between mb-3">
+        <div className="flex-1 flex flex-col min-h-0 p-4 overflow-hidden">
+          <div className="flex items-start justify-between gap-3 mb-3">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
               <MessageSquare className="w-3.5 h-3.5 text-indigo-400" /> Task
-              Canvas Notes
+              Notes
             </span>
             <span className="text-[9px] font-mono text-slate-500 truncate max-w-[150px]">
               {activeTask
@@ -756,201 +981,164 @@ export default function Dashboard() {
             </span>
           </div>
 
-          {/* Interactive Markdown Syntax Formatting Bar */}
+          {activeTask && (
+            <div className="mb-3 border border-slate-800/70 bg-[#111927]/60 rounded-lg p-3 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold text-slate-200 leading-snug">
+                {activeTask.title}
+              </p>
+              <div className="mt-2 flex items-center gap-2 text-[10px] text-slate-500">
+                <span>{activeTask.project || "To-do's"}</span>
+                <span className="w-1 h-1 rounded-full bg-slate-700" />
+                <span>{activeTask.priority}</span>
+                <span className="w-1 h-1 rounded-full bg-slate-700" />
+                <span>{activeTask.dueDate}</span>
+                
+              </div>
+              </div>
+              
+            </div>
+          )}
+
           <div className="flex items-center gap-1 p-1 bg-[#121926] rounded-lg border border-slate-800 mb-2">
             <button
+              disabled={!activeTask}
               onClick={() => insertMarkdownSyntax("bold")}
               title="Bold"
-              className="p-1.5 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 transition-all"
+              className="p-1.5 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <Bold className="w-3.5 h-3.5" />
             </button>
             <button
+              disabled={!activeTask}
               onClick={() => insertMarkdownSyntax("italic")}
               title="Italic"
-              className="p-1.5 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 transition-all"
+              className="p-1.5 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <Italic className="w-3.5 h-3.5" />
             </button>
             <div className="w-[1px] h-3 bg-slate-800 mx-1" />
             <button
+              disabled={!activeTask}
               onClick={() => insertMarkdownSyntax("h1")}
               title="Heading 1"
-              className="p-1.5 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 transition-all"
+              className="p-1.5 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <Heading1 className="w-3.5 h-3.5" />
             </button>
             <button
+              disabled={!activeTask}
               onClick={() => insertMarkdownSyntax("h2")}
               title="Heading 2"
-              className="p-1.5 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 transition-all"
+              className="p-1.5 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <Heading2 className="w-3.5 h-3.5" />
             </button>
             <div className="w-[1px] h-3 bg-slate-800 mx-1" />
             <button
+              disabled={!activeTask}
               onClick={() => insertMarkdownSyntax("bullet")}
               title="Bullet List"
-              className="p-1.5 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 transition-all"
+              className="p-1.5 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <List className="w-3.5 h-3.5" />
             </button>
             <button
+              disabled={!activeTask}
               onClick={() => insertMarkdownSyntax("code")}
               title="Code block"
-              className="p-1.5 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 transition-all"
+              className="p-1.5 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <Code className="w-3.5 h-3.5" />
             </button>
             <button
+              disabled={!activeTask}
               onClick={() => insertMarkdownSyntax("link")}
               title="Insert Link"
-              className="p-1.5 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 transition-all ml-auto"
+              className="p-1.5 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 transition-all ml-auto disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <Link className="w-3.5 h-3.5" />
             </button>
           </div>
 
-          {/* Text Area Note Engine with Reference Binding hooks */}
-          <textarea
-            ref={textareaRef}
-            value={activeTask ? activeTask.notes : ""}
-            disabled={!activeTask}
-            onChange={(e) => updateActiveTaskNotes(e.target.value)}
-            placeholder={
-              activeTask
-                ? "# Use tools above or write notes here...\nHighlight text and press a button above to format it instantly with Markdown tags."
-                : "Select or create a task map row to activate writing canvas space."
-            }
-            className="w-full flex-1 bg-transparent border-0 resize-none outline-none text-xs text-slate-300 font-mono leading-relaxed placeholder-slate-600 focus:ring-0 p-1 disabled:cursor-not-allowed"
-          />
-        </div>
-
-        {/* Bottom Half: Embedded Core AI Assistant Interface */}
-        <div className="flex-1 flex flex-col min-h-[50%] bg-[#0b101b] overflow-hidden justify-between">
-          <div className="px-4 py-3 bg-[#080d17] border-b border-slate-800/40 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-indigo-400 animate-pulse" />
-              <span className="text-xs font-semibold text-slate-200">
-                Context AI Co-Pilot
-              </span>
-            </div>
-            <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_6px_#10b981]" />
-          </div>
-
-          {/* Messages Feed History Streams */}
-          <div className="flex-1 p-4 overflow-y-auto space-y-3 custom-scrollbar text-xs">
-            {aiMessages.map((msg) => (
-              <div
-                key={msg.id}
-                className={`flex flex-col ${msg.sender === "user" ? "items-end" : "items-start"}`}
-              >
-                <div
-                  className={`p-2.5 rounded-xl max-w-[90%] leading-relaxed border ${
-                    msg.sender === "user"
-                      ? "bg-indigo-600/10 text-indigo-200 border-indigo-500/20 rounded-br-none"
-                      : "bg-[#121926] text-slate-300 border-slate-800/80 rounded-bl-none"
-                  }`}
-                >
-                  <div className="whitespace-pre-wrap">{msg.text}</div>
-                </div>
-              </div>
-            ))}
-
-            {isAiTyping && (
-              <div className="flex items-center gap-1.5 bg-[#121926] border border-slate-800/80 w-16 p-2 rounded-xl rounded-bl-none">
-                <span
-                  className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce"
-                  style={{ animationDelay: "0ms" }}
-                />
-                <span
-                  className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce"
-                  style={{ animationDelay: "150ms" }}
-                />
-                <span
-                  className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce"
-                  style={{ animationDelay: "300ms" }}
-                />
+          <div className="flex-[1.15] min-h-0 rounded-lg border border-slate-800/70 bg-[#0b121f] p-3 overflow-y-auto custom-scrollbar">
+            {activeTask ? (
+              <textarea
+                ref={textareaRef}
+                value={activeTask.notes}
+                onChange={(e) => updateActiveTaskNotes(e.target.value)}
+                placeholder="# Write raw Markdown here..."
+                className="h-full min-h-[220px] w-full resize-none bg-transparent font-mono text-xs leading-relaxed text-slate-300 outline-none placeholder-slate-600"
+              />
+            ) : (
+              <div className="flex h-full items-center justify-center text-center text-xs text-slate-600">
+                Select a task to start writing notes.
               </div>
             )}
           </div>
 
-          {/* Quick Prefill Actions Chips */}
-          <div className="px-3 pb-2 pt-1 flex gap-1.5 overflow-x-auto whitespace-nowrap hide-scrollbar">
-            <button
-              onClick={() => setAiInput("Break down this task context details")}
-              className="text-[10px] bg-slate-800/60 hover:bg-slate-800 text-slate-400 hover:text-slate-200 px-2.5 py-1 rounded-full border border-slate-800 transition-all flex-shrink-0"
-            >
-              ⚡ Break down task
-            </button>
-            <button
-              onClick={() =>
-                setAiInput("Draft technical notes implementation skeleton")
-              }
-              className="text-[10px] bg-slate-800/60 hover:bg-slate-800 text-slate-400 hover:text-slate-200 px-2.5 py-1 rounded-full border border-slate-800 transition-all flex-shrink-0"
-            >
-              📝 Draft technical notes
-            </button>
-          </div>
-
-          {/* Interactive Input Prompt Entry Pipeline Box */}
-          <div className="p-3 bg-[#080d17] border-t border-slate-800/60">
-            <div className="relative flex flex-col bg-[#111927] border border-slate-800 focus-within:border-indigo-500/80 rounded-xl transition-all">
-              <textarea
-                rows={2}
-                value={aiInput}
-                onChange={(e) => setAiInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSendAiMessage();
-                  }
-                }}
-                placeholder="Ask AI to break down this task or draft notes..."
-                className="w-full bg-transparent border-0 resize-none outline-none text-xs text-slate-200 placeholder-slate-600 p-2.5 pr-10 focus:ring-0"
-              />
-
-              <div className="flex items-center justify-between border-t border-slate-800/60 px-2.5 py-1.5">
-                <div className="flex items-center gap-2 text-slate-500">
-                  <button
-                    onClick={() => setAiInput((p) => p + " @")}
-                    title="Mention relative parameters"
-                    className="hover:text-indigo-400 transition-colors"
-                  >
-                    <AtSign className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => setAiInput((p) => p + " #")}
-                    title="Tag context label references"
-                    className="hover:text-indigo-400 transition-colors"
-                  >
-                    <Hash className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => setAiInput((p) => p + " /")}
-                    title="Prompt actions list modifiers"
-                    className="hover:text-indigo-400 font-mono text-[11px] leading-none px-0.5 transition-colors"
-                  >
-                    /
-                  </button>
-                </div>
-
-                <button
-                  onClick={handleSendAiMessage}
-                  disabled={!aiInput.trim()}
-                  className={`p-1.5 rounded-lg transition-all ${
-                    aiInput.trim()
-                      ? "bg-gradient-to-tr from-violet-600 to-indigo-500 text-white shadow-[0_0_10px_rgba(99,102,241,0.4)]"
-                      : "bg-slate-800 text-slate-600 cursor-not-allowed"
-                  }`}
-                >
-                  <Send className="w-3.5 h-3.5" />
-                </button>
-              </div>
+          <div className="mt-4 flex flex-[0.85] min-h-0 flex-col">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                Preview
+              </span>
+              <span className="text-[9px] text-slate-600">
+                Live task document
+              </span>
             </div>
+            <div
+              className="flex-1 overflow-y-auto rounded-lg border border-slate-800/70 bg-[#111927]/45 p-3 text-xs leading-relaxed text-slate-300 custom-scrollbar [&_a]:text-indigo-300 [&_a]:underline [&_code]:text-cyan-300 [&_h1]:mb-2 [&_h1]:text-base [&_h1]:font-bold [&_h1]:text-white [&_h2]:mb-2 [&_h2]:text-sm [&_h2]:font-bold [&_h2]:text-slate-100 [&_p]:mb-2 [&_pre]:mb-2 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-slate-950 [&_pre]:p-2 [&_ul]:mb-2 [&_ul]:list-disc [&_ul]:pl-5"
+              dangerouslySetInnerHTML={{
+                __html: activeTask?.notes
+                  ? renderMarkdownPreview(activeTask.notes)
+                  : '<p class="text-slate-600">Nothing written yet.</p>',
+              }}
+            />
           </div>
         </div>
       </aside>
+      <div>
+        {isAiModelOpen && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-[#0f172a] p-6 rounded-lg shadow-lg w-[400px] max-w-full">
+              <h2 className="text-lg font-bold text-white mb-4">AI Model</h2>
+              <p className="text-sm text-slate-300 mb-4">
+                Format the quick-add text into a project task.
+              </p>
+              <textarea
+                value={aiPrompt}
+                onChange={(e) => setAiPrompt(e.target.value)}
+                disabled={isAiLoading}
+                placeholder="Describe the task you want AI to format..."
+                className="min-h-28 w-full resize-none rounded-lg border border-slate-800 bg-[#0b121f] p-3 text-xs leading-relaxed text-slate-300 outline-none placeholder-slate-600 focus:border-indigo-500/70 disabled:cursor-not-allowed disabled:opacity-60"
+              />
+              {aiError && (
+                <p className="mt-3 text-xs text-rose-400">{aiError}</p>
+              )}
+              <div className="mt-5 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                  onClick={() => setIsAiModelOpen(false)}
+                  disabled={isAiLoading}
+                  className="px-4 py-2 border border-slate-700 text-slate-300 rounded hover:bg-slate-800 transition disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              <button
+                    type="button"
+                  onClick={() => {
+                    sendMessageToAI(aiPrompt);
+                  }}
+                  disabled={isAiLoading}
+                  className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-500 transition disabled:opacity-50"
+              >
+                  {isAiLoading ? "Formatting..." : "Generate Task"}
+              </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
