@@ -1,17 +1,6 @@
-"use client";
+﻿"use client";
 
-import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -31,7 +20,6 @@ export function ForgotPasswordForm({
     setError(null);
 
     try {
-      // The url which will be included in the email. This URL needs to be configured in your redirect URLs in the Supabase dashboard at https://supabase.com/dashboard/project/_/auth/url-configuration
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
         redirectTo: `${window.location.origin}/auth/update-password`,
       });
@@ -45,61 +33,93 @@ export function ForgotPasswordForm({
   };
 
   return (
-    <div className={cn("flex flex-col gap-6", className)} {...props}>
-      {success ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-2xl">Check Your Email</CardTitle>
-            <CardDescription>Password reset instructions sent</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">
-              If you registered using your email and password, you will receive
-              a password reset email.
+    <div
+      className="min-h-screen bg-[#0f172a] flex items-center justify-center p-6 antialiased relative"
+      {...props}
+    >
+      {/* Ambient glow */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[600px] h-[400px] bg-indigo-600/5 rounded-full blur-3xl" />
+        <div className="absolute bottom-1/4 left-1/3 w-[400px] h-[300px] bg-violet-600/5 rounded-full blur-3xl" />
+      </div>
+
+      <div className="relative w-full max-w-md">
+        {/* Logo */}
+        <div className="flex items-center justify-center gap-2.5 mb-8">
+          <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-violet-600 via-indigo-500 to-cyan-400 flex items-center justify-center shadow-[0_0_20px_rgba(99,102,241,0.5)]">
+            <span className="text-white text-sm font-black">T</span>
+          </div>
+          <span className="font-bold text-lg tracking-tight bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">
+            TaskFlow
+          </span>
+        </div>
+
+        {success ? (
+          <div className="bg-[#090d16] border border-slate-800/60 rounded-2xl p-8 shadow-2xl shadow-black/50 text-center">
+            <div className="w-12 h-12 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto mb-4">
+              <span className="text-emerald-400 text-xl">✓</span>
+            </div>
+            <h1 className="text-xl font-bold text-white mb-2">Check your email</h1>
+            <p className="text-sm text-slate-500">
+              If you registered using your email and password, you will receive a password reset link shortly.
             </p>
-          </CardContent>
-        </Card>
-      ) : (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-2xl">Reset Your Password</CardTitle>
-            <CardDescription>
-              Type in your email and we&apos;ll send you a link to reset your
-              password
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleForgotPassword}>
-              <div className="flex flex-col gap-6">
-                <div className="grid gap-2">
-                  <Label htmlFor="email">Email</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    placeholder="m@example.com"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                  />
-                </div>
-                {error && <p className="text-sm text-red-500">{error}</p>}
-                <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading ? "Sending..." : "Send reset email"}
-                </Button>
+            <Link href="/auth/login" className="mt-6 inline-block text-xs text-indigo-400 hover:text-indigo-300 transition-colors">
+              Back to sign in
+            </Link>
+          </div>
+        ) : (
+          <div className="bg-[#090d16] border border-slate-800/60 rounded-2xl p-8 shadow-2xl shadow-black/50">
+            <div className="mb-6">
+              <h1 className="text-xl font-bold text-white mb-1">Reset your password</h1>
+              <p className="text-sm text-slate-500">
+                Enter your email and we&apos;ll send you a reset link
+              </p>
+            </div>
+
+            <form onSubmit={handleForgotPassword} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-slate-400" htmlFor="forgot-email">
+                  Email address
+                </label>
+                <input
+                  id="forgot-email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  required
+                  className="w-full bg-[#111927] border border-slate-800 hover:border-slate-700 focus:border-indigo-500/60 focus:shadow-[0_0_15px_rgba(99,102,241,0.12)] rounded-xl px-4 py-2.5 text-sm text-slate-200 placeholder-slate-600 outline-none transition-all"
+                />
               </div>
-              <div className="mt-4 text-center text-sm">
-                Already have an account?{" "}
-                <Link
-                  href="/auth/login"
-                  className="underline underline-offset-4"
-                >
-                  Login
-                </Link>
-              </div>
+
+              {error && (
+                <p className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-lg px-3 py-2">
+                  {error}
+                </p>
+              )}
+
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="w-full mt-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-medium text-sm py-2.5 rounded-xl transition-all shadow-[0_0_20px_rgba(99,102,241,0.3)] hover:shadow-[0_0_25px_rgba(99,102,241,0.5)] disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {isLoading ? "Sending..." : "Send reset email"}
+              </button>
             </form>
-          </CardContent>
-        </Card>
-      )}
+
+            <p className="mt-5 text-center text-xs text-slate-500">
+              Remember your password?{" "}
+              <Link href="/auth/login" className="text-indigo-400 hover:text-indigo-300 font-medium transition-colors">
+                Sign in
+              </Link>
+            </p>
+          </div>
+        )}
+
+        <p className="mt-6 text-center text-[11px] text-slate-600">
+          TaskFlow &mdash; Streamline your workflow
+        </p>
+      </div>
     </div>
   );
 }

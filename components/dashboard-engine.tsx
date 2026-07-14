@@ -20,8 +20,10 @@ import {
   Link,
   Check,
   Trash2,
+  LogOut,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { useRouter } from "next/navigation";
 
 // --- TYPE DEFINITIONS ---
 interface Project {
@@ -200,6 +202,7 @@ const normalizePriority = (priority?: string): Task["priority"] => {
 
 export default function Dashboard() {
   const supabase = createClient();
+  const router = useRouter();
   // --- CORE ENGINE STATES ---
   const [currentView, setCurrentView] = useState<string>("Inbox"); // Tracks view context or active project selection
   const [priorityFilter, setPriorityFilter] = useState<
@@ -214,6 +217,9 @@ export default function Dashboard() {
   const [newTaskTitle, setNewTaskTitle] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [isSearching, setIsSearching] = useState<boolean>(false);
+  const [isTaskFormExpanded, setIsTaskFormExpanded] = useState<boolean>(false);
+  const [newTaskPriority, setNewTaskPriority] = useState<"Urgent" | "High" | "Medium" | "Low">("Medium");
+  const [isPriorityDropdownOpen, setIsPriorityDropdownOpen] = useState<boolean>(false);
 
   // UI Flow toggles
   const [activeTask, setActiveTask] = useState<Task | null>(null);
@@ -225,23 +231,23 @@ export default function Dashboard() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const loadProjects = async () => {
-  const { data, error } = await supabase
-    .from("projects")
-    .select("*")
-    .order("created_at");
+    const { data, error } = await supabase
+      .from("projects")
+      .select("*")
+      .order("created_at");
 
-  if (error) {
-    console.error(error);
-    return;
-  }
+    if (error) {
+      console.error(error);
+      return;
+    }
 
-  setProjects(data);
+    setProjects(data);
   };
 
   const loadTasks = async () => {
-  const { data, error } = await supabase
-    .from("tasks")
-    .select(`
+    const { data, error } = await supabase
+      .from("tasks")
+      .select(`
       *,
       projects (
         id,
@@ -249,25 +255,25 @@ export default function Dashboard() {
         color
       )
     `)
-    .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false });
 
-  if (error) {
-    console.error(error);
-    return;
-  }
+    if (error) {
+      console.error(error);
+      return;
+    }
 
-  const formatted: Task[] = data.map((task: any) => ({
-    id: task.id,
-    title: task.title,
-    project: task.projects?.name ?? "",
-    priority: task.priority,
-    dueDate: new Date(task.due_date).toLocaleDateString(),
-    completed: task.completed,
-    notes: task.notes ?? "",
-  }));
+    const formatted: Task[] = data.map((task: any) => ({
+      id: task.id,
+      title: task.title,
+      project: task.projects?.name ?? "",
+      priority: task.priority,
+      dueDate: new Date(task.due_date).toLocaleDateString(),
+      completed: task.completed,
+      notes: task.notes ?? "",
+    }));
 
-  setTasks(formatted);
-};
+    setTasks(formatted);
+  };
   // Sync active task tracking reference when item hooks shift
   useEffect(() => {
     selectedTaskIdRef.current = selectedTaskId;
@@ -282,9 +288,9 @@ export default function Dashboard() {
     }
   }, [selectedTaskId, tasks]);
   useEffect(() => {
-  loadProjects();
-  loadTasks();
-}, []);
+    loadProjects();
+    loadTasks();
+  }, []);
   // --- ACTIONS ENGINE ---
   const handleAddTask = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -293,13 +299,10 @@ export default function Dashboard() {
 
     const project = projects.find((p) => p.name === currentView);
 
-    const priority =
-      priorityFilter === "All" ? "Medium" : priorityFilter;
-
     const { error } = await supabase.from("tasks").insert({
       title: newTaskTitle,
       project: project?.id ?? null,
-      priority,
+      priority: newTaskPriority,
       due_date: new Date(),
       completed: false,
       notes: "",
@@ -311,6 +314,9 @@ export default function Dashboard() {
     }
 
     setNewTaskTitle("");
+    setNewTaskPriority("Medium");
+    setIsTaskFormExpanded(false);
+    setIsPriorityDropdownOpen(false);
 
     await loadTasks();
   };
@@ -363,7 +369,7 @@ export default function Dashboard() {
 
     await loadTasks();
   };
-    
+
   const toggleTaskCompletion = async (
     id: string,
     e: React.MouseEvent
@@ -428,7 +434,7 @@ export default function Dashboard() {
       if (!response.ok) {
         throw new Error(
           parseAIError(rawResponse) ||
-            "AI request failed. Check your API key and server log.",
+          "AI request failed. Check your API key and server log.",
         );
       }
 
@@ -456,8 +462,11 @@ export default function Dashboard() {
       setTasks((currentTasks) => [newTask, ...currentTasks]);
       setSelectedTaskId(newTask.id);
       setNewTaskTitle("");
+      setNewTaskPriority("Medium");
       setAiPrompt("");
       setIsAiModelOpen(false);
+      setIsTaskFormExpanded(false);
+      setIsPriorityDropdownOpen(false);
     } catch (error) {
       setAiError(
         error instanceof Error
@@ -610,11 +619,10 @@ export default function Dashboard() {
                 setCurrentView("Inbox");
                 setPriorityFilter("All");
               }}
-              className={`w-full flex items-center justify-between text-xs px-3 py-2 rounded-lg font-medium transition-all ${
-                currentView === "Inbox"
-                  ? "bg-gradient-to-r from-indigo-500/10 to-transparent border-l-2 border-indigo-500 text-indigo-400"
-                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40"
-              }`}
+              className={`w-full flex items-center justify-between text-xs px-3 py-2 rounded-lg font-medium transition-all ${currentView === "Inbox"
+                ? "bg-gradient-to-r from-indigo-500/10 to-transparent border-l-2 border-indigo-500 text-indigo-400"
+                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40"
+                }`}
             >
               <div className="flex items-center gap-2.5">
                 <Inbox className="w-4 h-4" />
@@ -627,11 +635,10 @@ export default function Dashboard() {
 
             <button
               onClick={() => setCurrentView("Today")}
-              className={`w-full flex items-center justify-between text-xs px-3 py-2 rounded-lg font-medium transition-all ${
-                currentView === "Today"
-                  ? "bg-gradient-to-r from-indigo-500/10 to-transparent border-l-2 border-indigo-500 text-indigo-400"
-                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40"
-              }`}
+              className={`w-full flex items-center justify-between text-xs px-3 py-2 rounded-lg font-medium transition-all ${currentView === "Today"
+                ? "bg-gradient-to-r from-indigo-500/10 to-transparent border-l-2 border-indigo-500 text-indigo-400"
+                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40"
+                }`}
             >
               <div className="flex items-center gap-2.5">
                 <Sun className="w-4 h-4 text-amber-500/80" />
@@ -647,11 +654,10 @@ export default function Dashboard() {
 
             <button
               onClick={() => setCurrentView("Upcoming")}
-              className={`w-full flex items-center justify-between text-xs px-3 py-2 rounded-lg font-medium transition-all ${
-                currentView === "Upcoming"
-                  ? "bg-gradient-to-r from-indigo-500/10 to-transparent border-l-2 border-indigo-500 text-indigo-400"
-                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40"
-              }`}
+              className={`w-full flex items-center justify-between text-xs px-3 py-2 rounded-lg font-medium transition-all ${currentView === "Upcoming"
+                ? "bg-gradient-to-r from-indigo-500/10 to-transparent border-l-2 border-indigo-500 text-indigo-400"
+                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40"
+                }`}
             >
               <div className="flex items-center gap-2.5">
                 <Calendar className="w-4 h-4 text-purple-400" />
@@ -680,11 +686,10 @@ export default function Dashboard() {
                 <button
                   key={p.id}
                   onClick={() => setCurrentView(p.name)}
-                  className={`w-full flex items-center justify-between text-xs px-3 py-1.5 rounded-lg transition-all group ${
-                    currentView === p.name
-                      ? "bg-slate-800/60 text-indigo-400 font-medium"
-                      : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/30"
-                  }`}
+                  className={`w-full flex items-center justify-between text-xs px-3 py-1.5 rounded-lg transition-all group ${currentView === p.name
+                    ? "bg-slate-800/60 text-indigo-400 font-medium"
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/30"
+                    }`}
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
                     <span className={`w-1.5 h-1.5 rounded-full ${p.color}`} />
@@ -699,6 +704,16 @@ export default function Dashboard() {
 
         {/* Operational Profile Footing and Fully Actionable Settings Interface */}
         <div className="pt-4 border-t border-slate-800/60">
+          <button
+            onClick={async () => {
+              await supabase.auth.signOut();
+              router.push("/auth/login");
+            }}
+            className="w-full flex items-center gap-2.5 text-xs px-2 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/30 transition-all mb-2"
+          >
+            <LogOut className="w-4 h-4 text-slate-500" />
+            <span>Sign Out</span>
+          </button>
           <button
             onClick={() => {
               alert(
@@ -752,11 +767,10 @@ export default function Dashboard() {
                   <button
                     key={f}
                     onClick={() => setPriorityFilter(f)}
-                    className={`px-2.5 py-1 text-[11px] font-medium rounded-md transition-all ${
-                      priorityFilter === f
-                        ? "bg-indigo-600 text-white shadow-sm"
-                        : "text-slate-400 hover:text-slate-200"
-                    }`}
+                    className={`px-2.5 py-1 text-[11px] font-medium rounded-md transition-all ${priorityFilter === f
+                      ? "bg-indigo-600 text-white shadow-sm"
+                      : "text-slate-400 hover:text-slate-200"
+                      }`}
                   >
                     {f}
                   </button>
@@ -769,32 +783,122 @@ export default function Dashboard() {
           </div>
 
           {/* Quick-add Input Pipeline Task Generator Box */}
-          <form onSubmit={handleAddTask} className="mb-6 relative group">
-            <input
-              type="text"
-              value={newTaskTitle}
-              onChange={(e) => setNewTaskTitle(e.target.value)}
-              placeholder={`Add task into '${currentView}' with [${priorityFilter === "All" ? "Medium" : priorityFilter}] priority...`}
-              className="w-full bg-[#111927] border border-slate-800 hover:border-slate-700/80 focus:border-indigo-500/80 rounded-xl px-4 py-3 text-xs text-slate-200 placeholder-slate-500 outline-none transition-all shadow-inner pr-12 focus:shadow-[0_0_15px_rgba(99,102,241,0.15)]"
-            />
+          {/* Quick-add Input Pipeline Task Generator Box */}
+          {!isTaskFormExpanded ? (
             <button
-              type="button"
-              onClick={() => {
-                setAiError("");
-                setAiPrompt(newTaskTitle);
-                setIsAiModelOpen(true);
-              }}
-              className="absolute right-10 top-2.5 px-1 py-0.5 rounded-lg text-xs border border-slate-600 hover:bg-slate-800 transition-colors"
+              onClick={() => setIsTaskFormExpanded(true)}
+              className="w-full bg-[#111927]/60 hover:bg-[#111927] border border-dashed border-slate-800 hover:border-indigo-500/30 rounded-xl px-4 py-3 text-xs text-slate-500 hover:text-indigo-400 transition-all mb-6 flex items-center justify-center gap-2 group"
             >
-              AI
+              <Plus className="w-4 h-4 transition-colors" />
+              <span className="font-medium">Create a new task</span>
             </button>
-            <button
-              type="submit"
-              className="absolute right-2.5 top-2 bg-indigo-600 hover:bg-indigo-500 p-1.5 rounded-lg text-white transition-all shadow"
-            >
-              <Plus className="w-3.5 h-3.5" />
-            </button>
-          </form>
+          ) : (
+            <div className="mb-6 bg-[#090d16] border border-slate-800/60 rounded-2xl overflow-visible shadow-xl shadow-black/20">
+              {/* Header row */}
+              <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800/60">
+                <div className="flex items-center gap-2">
+                  <Plus className="w-3.5 h-3.5 text-indigo-400" />
+                  <span className="text-xs font-semibold text-slate-300">New Task</span>
+                  <span className="text-[10px] text-slate-600 font-mono">· {currentView}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsTaskFormExpanded(false);
+                    setNewTaskTitle("");
+                    setNewTaskPriority("Medium");
+                    setIsPriorityDropdownOpen(false);
+                  }}
+                  className="text-slate-600 hover:text-slate-300 transition-colors p-0.5 rounded"
+                >
+                  ✕
+                </button>
+              </div>
+              {/* Form body */}
+              <form onSubmit={handleAddTask} className="p-4 space-y-3">
+                <input
+                  type="text"
+                  value={newTaskTitle}
+                  onChange={(e) => setNewTaskTitle(e.target.value)}
+                  placeholder="Task name..."
+                  autoFocus
+                  className="w-full bg-[#111927] border border-slate-800/80 hover:border-slate-700 focus:border-indigo-500/60 focus:shadow-[0_0_15px_rgba(99,102,241,0.12)] rounded-xl px-4 py-2.5 text-sm text-slate-200 placeholder-slate-600 outline-none transition-all"
+                />
+                {/* Action bar */}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    {/* Priority dropdown */}
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setIsPriorityDropdownOpen(!isPriorityDropdownOpen)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] border font-semibold transition-all flex items-center gap-1.5 ${
+                          newTaskPriority === "Urgent"
+                            ? "text-rose-400 border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20"
+                            : newTaskPriority === "High"
+                              ? "text-amber-400 border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20"
+                              : newTaskPriority === "Medium"
+                                ? "text-indigo-400 border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20"
+                                : "text-slate-400 border-slate-500/30 bg-slate-500/10 hover:bg-slate-500/20"
+                        }`}
+                      >
+                        <span>{newTaskPriority}</span>
+                        <span className="text-[8px] opacity-60">▼</span>
+                      </button>
+                      {isPriorityDropdownOpen && (
+                        <div className="absolute left-0 mt-1.5 w-24 bg-[#090d16] border border-slate-800/80 rounded-lg shadow-xl z-20 py-1">
+                          {(["Urgent", "High", "Medium", "Low"] as const).map((p) => (
+                            <button
+                              key={p}
+                              type="button"
+                              onClick={() => {
+                                setNewTaskPriority(p);
+                                setIsPriorityDropdownOpen(false);
+                              }}
+                              className={`w-full text-left px-3 py-1.5 text-[11px] transition-colors hover:bg-slate-800 ${
+                                newTaskPriority === p
+                                  ? p === "Urgent"
+                                    ? "text-rose-400 font-bold"
+                                    : p === "High"
+                                      ? "text-amber-400 font-bold"
+                                      : p === "Medium"
+                                        ? "text-indigo-400 font-bold"
+                                        : "text-slate-200 font-bold"
+                                  : "text-slate-400 hover:text-slate-200"
+                              }`}
+                            >
+                              {p}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    {/* AI button */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAiError("");
+                        setAiPrompt(newTaskTitle);
+                        setIsAiModelOpen(true);
+                      }}
+                      className="px-2.5 py-1 text-[11px] rounded-lg bg-gradient-to-r from-violet-600/20 to-indigo-600/20 border border-indigo-500/30 text-indigo-400 hover:border-indigo-500/60 hover:text-indigo-300 transition-all flex items-center gap-1.5 font-medium"
+                    >
+                      <span className="text-[10px]">✦</span>
+                      <span>AI</span>
+                    </button>
+                  </div>
+                  {/* Submit */}
+                  <button
+                    type="submit"
+                    className="px-4 py-1.5 text-[11px] font-semibold rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white transition-all shadow-[0_0_15px_rgba(99,102,241,0.3)] hover:shadow-[0_0_20px_rgba(99,102,241,0.5)] flex items-center gap-1.5"
+                  >
+                    <Plus className="w-3 h-3" />
+                    Add Task
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
 
           {/* Main Reactive Dynamic Tasks Matrix Container Blocks */}
           <div className="space-y-6">
@@ -816,11 +920,10 @@ export default function Dashboard() {
                     <div
                       key={task.id}
                       onClick={() => setSelectedTaskId(task.id)}
-                      className={`w-full flex items-center justify-between p-3 rounded-xl border text-left cursor-pointer transition-all group/row relative ${
-                        selectedTaskId === task.id
-                          ? "bg-gradient-to-r from-indigo-500/10 to-transparent border-indigo-500/80 shadow-[0_0_15px_rgba(99,102,241,0.06)]"
-                          : "bg-[#111927]/60 border-slate-800/80 hover:bg-[#111927] hover:border-slate-700"
-                      }`}
+                      className={`w-full flex items-center justify-between p-3 rounded-xl border text-left cursor-pointer transition-all group/row relative ${selectedTaskId === task.id
+                        ? "bg-gradient-to-r from-indigo-500/10 to-transparent border-indigo-500/80 shadow-[0_0_15px_rgba(99,102,241,0.06)]"
+                        : "bg-[#111927]/60 border-slate-800/80 hover:bg-[#111927] hover:border-slate-700"
+                        }`}
                     >
                       <div className="flex items-center gap-3 min-w-0 flex-1 pr-12">
                         <button
@@ -842,22 +945,20 @@ export default function Dashboard() {
                       {/* Controls and Tags segment wrapper */}
                       <div className="flex items-center gap-2 flex-shrink-0 group-hover/row:opacity-0 transition-opacity duration-150">
                         <span
-                          className={`text-[9px] px-2 py-0.5 rounded-full border font-medium ${
-                            task.priority === "Urgent"
-                              ? "bg-rose-500/10 text-rose-400 border-rose-500/20"
-                              : task.priority === "High"
-                                ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
-                                : "bg-indigo-500/10 text-indigo-400 border-indigo-500/20"
-                          }`}
+                          className={`text-[9px] px-2 py-0.5 rounded-full border font-medium ${task.priority === "Urgent"
+                            ? "bg-rose-500/10 text-rose-400 border-rose-500/20"
+                            : task.priority === "High"
+                              ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                              : "bg-indigo-500/10 text-indigo-400 border-indigo-500/20"
+                            }`}
                         >
                           {task.priority}
                         </span>
                         <span
-                          className={`text-[10px] font-medium px-2 py-0.5 rounded ${
-                            task.dueDate === "Today"
-                              ? "bg-amber-500/10 text-amber-500 border border-amber-500/20"
-                              : "text-slate-500"
-                          }`}
+                          className={`text-[10px] font-medium px-2 py-0.5 rounded ${task.dueDate === "Today"
+                            ? "bg-amber-500/10 text-amber-500 border border-amber-500/20"
+                            : "text-slate-500"
+                            }`}
                         >
                           {task.dueDate}
                         </span>
@@ -895,11 +996,10 @@ export default function Dashboard() {
                     <div
                       key={task.id}
                       onClick={() => setSelectedTaskId(task.id)}
-                      className={`w-full flex items-center justify-between p-3 rounded-xl border text-left cursor-pointer group/row relative transition-all ${
-                        selectedTaskId === task.id
-                          ? "bg-[#111927] border-emerald-500/60"
-                          : "bg-[#111927]/40 border-slate-800/40"
-                      }`}
+                      className={`w-full flex items-center justify-between p-3 rounded-xl border text-left cursor-pointer group/row relative transition-all ${selectedTaskId === task.id
+                        ? "bg-[#111927] border-emerald-500/60"
+                        : "bg-[#111927]/40 border-slate-800/40"
+                        }`}
                     >
                       <div className="flex items-center gap-3 min-w-0 flex-1 pr-12 opacity-60">
                         <button
@@ -985,18 +1085,18 @@ export default function Dashboard() {
             <div className="mb-3 border border-slate-800/70 bg-[#111927]/60 rounded-lg p-3 flex items-center justify-between gap-3">
               <div>
                 <p className="text-xs font-semibold text-slate-200 leading-snug">
-                {activeTask.title}
-              </p>
-              <div className="mt-2 flex items-center gap-2 text-[10px] text-slate-500">
-                <span>{activeTask.project || "To-do's"}</span>
-                <span className="w-1 h-1 rounded-full bg-slate-700" />
-                <span>{activeTask.priority}</span>
-                <span className="w-1 h-1 rounded-full bg-slate-700" />
-                <span>{activeTask.dueDate}</span>
-                
+                  {activeTask.title}
+                </p>
+                <div className="mt-2 flex items-center gap-2 text-[10px] text-slate-500">
+                  <span>{activeTask.project || "To-do's"}</span>
+                  <span className="w-1 h-1 rounded-full bg-slate-700" />
+                  <span>{activeTask.priority}</span>
+                  <span className="w-1 h-1 rounded-full bg-slate-700" />
+                  <span>{activeTask.dueDate}</span>
+
+                </div>
               </div>
-              </div>
-              
+
             </div>
           )}
 
@@ -1099,41 +1199,72 @@ export default function Dashboard() {
       </aside>
       <div>
         {isAiModelOpen && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-[#0f172a] p-6 rounded-lg shadow-lg w-[400px] max-w-full">
-              <h2 className="text-lg font-bold text-white mb-4">AI Model</h2>
-              <p className="text-sm text-slate-300 mb-4">
-                Format the quick-add text into a project task.
-              </p>
-              <textarea
-                value={aiPrompt}
-                onChange={(e) => setAiPrompt(e.target.value)}
-                disabled={isAiLoading}
-                placeholder="Describe the task you want AI to format..."
-                className="min-h-28 w-full resize-none rounded-lg border border-slate-800 bg-[#0b121f] p-3 text-xs leading-relaxed text-slate-300 outline-none placeholder-slate-600 focus:border-indigo-500/70 disabled:cursor-not-allowed disabled:opacity-60"
-              />
-              {aiError && (
-                <p className="mt-3 text-xs text-rose-400">{aiError}</p>
-              )}
-              <div className="mt-5 flex items-center justify-end gap-2">
-                  <button
-                    type="button"
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
+            <div className="bg-[#090d16] border border-slate-800/60 rounded-2xl shadow-2xl shadow-black/60 w-[480px] max-w-[calc(100vw-2rem)] overflow-hidden">
+              {/* Gradient top accent */}
+              <div className="h-[2px] bg-gradient-to-r from-violet-600 via-indigo-500 to-cyan-400" />
+              {/* Header */}
+              <div className="flex items-start justify-between px-6 pt-5 pb-4 border-b border-slate-800/60">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-indigo-400 text-base">✦</span>
+                    <h2 className="text-base font-bold text-white">AI Task Generator</h2>
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    Describe what you need to do — AI will format it into a structured task.
+                  </p>
+                </div>
+                <button
+                  type="button"
                   onClick={() => setIsAiModelOpen(false)}
                   disabled={isAiLoading}
-                  className="px-4 py-2 border border-slate-700 text-slate-300 rounded hover:bg-slate-800 transition disabled:opacity-50"
+                  className="text-slate-600 hover:text-slate-300 transition-colors p-1 mt-0.5 disabled:opacity-40"
                 >
-                  Cancel
+                  ✕
                 </button>
-              <button
-                    type="button"
-                  onClick={() => {
-                    sendMessageToAI(aiPrompt);
-                  }}
+              </div>
+              {/* Body */}
+              <div className="p-6">
+                <textarea
+                  value={aiPrompt}
+                  onChange={(e) => setAiPrompt(e.target.value)}
                   disabled={isAiLoading}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-500 transition disabled:opacity-50"
-              >
-                  {isAiLoading ? "Formatting..." : "Generate Task"}
-              </button>
+                  placeholder={`e.g., "Review Q3 analytics report and prepare a summary for tomorrow's team meeting"`}
+                  className="min-h-[120px] w-full resize-none rounded-xl border border-slate-800 bg-[#111927] p-3.5 text-sm leading-relaxed text-slate-300 outline-none placeholder-slate-600 focus:border-indigo-500/60 focus:shadow-[0_0_15px_rgba(99,102,241,0.12)] transition-all disabled:cursor-not-allowed disabled:opacity-60"
+                />
+                {aiError && (
+                  <p className="mt-3 text-xs text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-lg px-3 py-2">
+                    {aiError}
+                  </p>
+                )}
+                <div className="mt-4 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsAiModelOpen(false)}
+                    disabled={isAiLoading}
+                    className="px-4 py-2 text-sm border border-slate-700/80 text-slate-400 rounded-xl hover:bg-slate-800/50 hover:text-slate-200 transition-all disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => sendMessageToAI(aiPrompt)}
+                    disabled={isAiLoading}
+                    className="px-4 py-2 text-sm font-medium rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white transition-all shadow-[0_0_15px_rgba(99,102,241,0.3)] disabled:opacity-60 flex items-center gap-2"
+                  >
+                    {isAiLoading ? (
+                      <>
+                        <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        <span>Generating...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-[11px]">✦</span>
+                        <span>Generate Task</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
