@@ -25,6 +25,8 @@ import {
   Check,
   FolderClosed,
   Trash2,
+  LogOut,
+  X,
 } from "lucide-react";
 
 // --- TYPE DEFINITIONS ---
@@ -53,10 +55,11 @@ interface Message {
 
 export default function Dashboard() {
   // --- CORE ENGINE STATES ---
-  const [currentView, setCurrentView] = useState<string>("Inbox"); // Tracks view context or active project selection
+  const [currentView, setCurrentView] = useState<string>("Inbox");
   const [priorityFilter, setPriorityFilter] = useState<
     "All" | "Urgent" | "High" | "Medium"
   >("All");
+  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false); // Modal control state
 
   const [projects, setProjects] = useState<Project[]>([
     {
@@ -113,12 +116,12 @@ export default function Dashboard() {
   ]);
 
   const [selectedTaskId, setSelectedTaskId] = useState<string>("1");
-  const [newTaskTitle, setNewTaskTitle] = useState<string>("");
-  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [newTaskTitle, setNewTaskTitle] = useState<string>(" ");
+  const [searchQuery, setSearchQuery] = useState<string>(" ");
   const [isSearching, setIsSearching] = useState<boolean>(false);
 
   // AI State Engines
-  const [aiInput, setAiInput] = useState<string>("");
+  const [aiInput, setAiInput] = useState<string>(" ");
   const [isAiTyping, setIsAiTyping] = useState<boolean>(false);
   const [aiMessages, setAiMessages] = useState<Message[]>([
     {
@@ -151,11 +154,8 @@ export default function Dashboard() {
     e.preventDefault();
     if (!newTaskTitle.trim()) return;
 
-    // Fallback assignment to ensure priority tracks precisely against currently chosen priority filter
     const determinedPriority =
       priorityFilter === "All" ? "Medium" : priorityFilter;
-
-    // Assign project metadata intelligently based on current navigation location context
     const currentProjectMatch = projects.find((p) => p.name === currentView);
     const assignedProjectName = currentProjectMatch
       ? currentProjectMatch.name
@@ -200,7 +200,7 @@ export default function Dashboard() {
   };
 
   const handleDeleteTask = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation(); // Stops system row item context highlights from triggering
+    e.stopPropagation();
     const updatedTasks = tasks.filter((t) => t.id !== id);
     setTasks(updatedTasks);
   };
@@ -217,6 +217,11 @@ export default function Dashboard() {
     setTasks(
       tasks.map((t) => (t.id === selectedTaskId ? { ...t, notes: val } : t)),
     );
+  };
+
+  const handleLogout = () => {
+    // Redirects browser view directly to the application authentication route endpoint structure
+    window.location.href = "/auth/login";
   };
 
   // --- RICH TEXT FORMATTING WRAPPER ---
@@ -262,7 +267,6 @@ export default function Dashboard() {
       currentText.substring(endPos);
     updateActiveTaskNotes(updatedNotes);
 
-    // Refocus cursor selection indices cleanly
     setTimeout(() => {
       textarea.focus();
       textarea.setSelectionRange(
@@ -311,14 +315,12 @@ export default function Dashboard() {
 
   // --- STATS LOGIC COMPUTATION ---
   const filteredTasks = tasks.filter((t) => {
-    // 1. Search filter criteria
     if (
       searchQuery.trim() !== "" &&
       !t.title.toLowerCase().includes(searchQuery.toLowerCase())
     )
       return false;
 
-    // 2. Navigation View contextual sorting rules
     if (currentView === "Today") {
       if (t.dueDate !== "Today") return false;
     } else if (currentView === "Upcoming") {
@@ -331,7 +333,6 @@ export default function Dashboard() {
       if (t.project !== currentView) return false;
     }
 
-    // 3. Priority matrix filter switch
     if (priorityFilter === "All") return true;
     return t.priority === priorityFilter;
   });
@@ -348,7 +349,68 @@ export default function Dashboard() {
     totalTasksCount > 0 ? (doneCount / totalTasksCount) * 100 : 0;
 
   return (
-    <div className="flex w-full h-screen bg-[#0f172a] text-[#f8fafc] font-sans overflow-hidden antialiased selection:bg-indigo-500/30">
+    <div className="flex w-full h-screen bg-[#0f172a] text-[#f8fafc] font-sans overflow-hidden antialiased selection:bg-indigo-500/30 relative">
+      {/* ========================================================
+          D. MODAL DIALOG COMPONENT ENGINE (Settings / Logout Overlay)
+          ======================================================== */}
+      {isSettingsOpen && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in">
+          <div className="bg-[#0b121f] border border-slate-800 rounded-2xl w-full max-w-sm p-6 shadow-2xl relative overflow-hidden">
+            {/* Modal Header Accent Line */}
+            <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-violet-600 via-indigo-500 to-cyan-400" />
+
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-bold tracking-tight text-white flex items-center gap-2">
+                <Settings className="w-4 h-4 text-indigo-400" /> Account
+                Workspace Settings
+              </h3>
+              <button
+                onClick={() => setIsSettingsOpen(false)}
+                className="p-1 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-slate-800/50 transition-all"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4 py-2">
+              <div className="bg-slate-900/40 border border-slate-800/80 rounded-xl p-3 flex items-center gap-3">
+                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-600 to-purple-600 flex items-center justify-center text-xs font-bold text-white uppercase">
+                  IE
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-slate-200">
+                    Intern Engine Profile
+                  </p>
+                  <p className="text-[10px] text-slate-500">
+                    Active Node Session ID
+                  </p>
+                </div>
+              </div>
+              <p className="text-[11px] text-slate-400 leading-normal">
+                Are you sure you want to log out of TaskFlow? You will need to
+                re-authenticate using your Supabase account parameters to access
+                your dashboard metrics.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2.5 mt-5 pt-3 border-t border-slate-800/60">
+              <button
+                onClick={() => setIsSettingsOpen(false)}
+                className="flex-1 bg-slate-900 hover:bg-slate-800/80 border border-slate-800 text-slate-300 text-xs font-medium py-2 rounded-xl transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleLogout}
+                className="flex-1 bg-rose-600 hover:bg-rose-500 text-white text-xs font-medium py-2 rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-rose-950/20"
+              >
+                <LogOut className="w-3.5 h-3.5" /> Log Out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ========================================================
           A. LEFT SIDEBAR (Navigation) [220px]
           ======================================================== */}
@@ -485,12 +547,12 @@ export default function Dashboard() {
         {/* Operational Profile Footing and Fully Actionable Settings Interface */}
         <div className="pt-4 border-t border-slate-800/60">
           <button
-            onClick={() => {
-              alert(
-                "TaskFlow Settings Configuration Engine v1.0.0 (Next.js/Supabase Instance Active)",
-              );
-            }}
-            className="w-full flex items-center gap-2.5 text-xs px-2 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/30 transition-all mb-2"
+            onClick={() => setIsSettingsOpen(true)} // Toggles the overlay configuration modal open
+            className={`w-full flex items-center gap-2.5 text-xs px-2 py-1.5 rounded-lg transition-all mb-2 ${
+              isSettingsOpen
+                ? "bg-slate-800/80 text-white font-medium"
+                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/30"
+            }`}
           >
             <Settings className="w-4 h-4 text-slate-500" />
             <span>Settings</span>
